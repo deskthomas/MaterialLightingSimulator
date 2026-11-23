@@ -2,12 +2,15 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
+import org.lwjgl.system.Configuration;
+import org.lwjgl.system.Platform;
 
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
 
+import java.awt.Toolkit;
 import java.awt.event.KeyEvent;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.locks.LockSupport;
@@ -54,6 +57,11 @@ public class Main {
             (x, y, altDown) -> controlChanges.add(() -> look(x, y, altDown)));
 
     public static void main(String[] args) {
+        if (Platform.get() == Platform.MACOSX) {
+            // Let AWT own the Cocoa event loop and dispatch GLFW's Cocoa calls to it.
+            Configuration.GLFW_LIBRARY_NAME.set("glfw_async");
+            Toolkit.getDefaultToolkit();
+        }
         new Main().run();
     }
 
