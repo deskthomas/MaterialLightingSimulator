@@ -1,4 +1,5 @@
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
@@ -29,14 +30,14 @@ final class DisplayObjects implements AutoCloseable {
     static final int COUNT = SPECS.size();
 
     private final List<Mesh> meshes = new ArrayList<>();
-    private final List<Matrix4f> models = new ArrayList<>();
+    private final List<Pose> poses = new ArrayList<>();
 
-    DisplayObjects(float stageTop) {
+    DisplayObjects(float floorHeight) {
         try {
             for (ObjectSpec spec : SPECS) {
-                meshes.add(ModelLoader.loadGlb("/models/" + spec.asset() + ".glb"));
-                models.add(new Matrix4f().translation(0, stageTop, 0)
-                        .rotateY((float) Math.toRadians(spec.yaw())).scale(spec.height()));
+                float[] geometry = ModelLoader.loadGeometry("/models/" + spec.asset() + ".glb");
+                meshes.add(Mesh.withNormals(geometry));
+                poses.add(new Pose(geometry, floorHeight, spec));
             }
         } catch (RuntimeException | Error failure) {
             close();
@@ -57,8 +58,20 @@ final class DisplayObjects implements AutoCloseable {
         return SPECS.get(index).name();
     }
 
-    void setLights(StudioLighting lighting) {
-        meshes.forEach(mesh -> mesh.setLights(lighting));
+    void setLights(StudioLighting lighting, float targetHeight) {
+        meshes.forEach(mesh -> mesh.setLights(lighting, targetHeight));
+    }
+
+    void setShadows(StudioShadows shadows, float opacity) {
+        meshes.forEach(mesh -> mesh.setShadows(shadows, opacity));
+    }
+
+    void captureShadow(int index, StudioShadows shadows) {
+        shadows.capture(meshes.get(index), poses.get(index).model);
+    }
+
+    void rotate(int index, float yaw, float tilt, Matrix4f view) {
+        poses.get(index).rotate(yaw, tilt, view);
     }
 
     static boolean isGlass(int index) {
@@ -67,12 +80,53 @@ final class DisplayObjects implements AutoCloseable {
 
     void draw(int index, Matrix4f viewProjection, Matrix4f view, Vector3f eye) {
         ObjectSpec spec = SPECS.get(index);
-        meshes.get(index).drawMaterial(viewProjection, view, models.get(index), eye,
+        meshes.get(index).drawMaterial(viewProjection, view, poses.get(index).model, eye,
                 spec.red(), spec.green(), spec.blue(), spec.material(), spec.roughness());
     }
 
     @Override
     public void close() {
         meshes.forEach(Mesh::close);
+    }
+
+    private static final class Pose {
+        private final float[] points;
+        private final float floorHeight;
+        private final float size;
+        private final Quaternionf orientation = new Quaternionf();
+        private final Quaternionf step = new Quaternionf();
+        private final Matrix4f model = new Matrix4f();
+
+        Pose(float[] geometry, float floorHeight, ObjectSpec spec) {
+            this.floorHeight = floorHeight;
+            this.size = spec.height();
+            orientation.rotationY((float) Math.toRadians(spec.yaw()));
+            points = new float[geometry.length / 2];
+            for (int source = 0, point = 0; source < geometry.length; source += 6, point += 3) {
+                points[point] = geometry[source];
+                points[point + 1] = geometry[source + 1] - 0.5f;
+                points[point + 2] = geometry[source + 2];
+            }
+            updateModel();
+        }
+
+        void rotate(float yaw, float tilt, Matrix4f view) {
+            step.rotationY(yaw).mul(orientation, orientation);
+            // Tilt around the screen's horizontal axis, regardless of which way the object is facing.
+            step.rotationAxis(tilt, view.m00(), 0, view.m20()).mul(orientation, orientation).normalize();
+            updateModel();
+        }
+
+        private void updateModel() {
+            model.rotation(orientation);
+            float x = model.m01(), y = model.m11(), z = model.m21();
+            float lowest = Float.POSITIVE_INFINITY;
+            for (int i = 0; i < points.length; i += 3) {
+                lowest = Math.min(lowest, x * points[i] + y * points[i + 1] + z * points[i + 2]);
+            }
+            // Bring the lowest rotated vertex back into contact with the floor.
+            model.translation(0, floorHeight - lowest * size, 0)
+                    .rotate(orientation).scale(size).translate(0, -0.5f, 0);
+        }
     }
 }

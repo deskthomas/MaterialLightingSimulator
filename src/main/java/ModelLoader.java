@@ -16,6 +16,10 @@ final class ModelLoader {
     private ModelLoader() {}
 
     static Mesh loadGlb(String resource) {
+        return Mesh.withNormals(loadGeometry(resource));
+    }
+
+    static float[] loadGeometry(String resource) {
         byte[] bytes;
         try (InputStream input = ModelLoader.class.getResourceAsStream(resource)) {
             if (input == null) {
@@ -36,7 +40,7 @@ final class ModelLoader {
                 throw new IllegalArgumentException("Could not load " + resource + ": " + aiGetErrorString());
             }
             try {
-                return Mesh.withNormals(copyTriangles(scene));
+                return copyTriangles(scene);
             } finally {
                 aiReleaseImport(scene);
             }

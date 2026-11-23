@@ -6,7 +6,7 @@ import java.util.function.Consumer;
 import static org.lwjgl.opengl.GL33.*;
 
 final class StudioEnvironment implements AutoCloseable {
-    private static final int FACE_SIZE = 256;
+    private static final int FACE_SIZE = 512;
     private static final float[][] DIRECTIONS = {
             { 1, 0, 0, 0, -1, 0}, {-1,  0, 0, 0, -1,  0},
             { 0, 1, 0, 0,  0, 1}, { 0, -1, 0, 0,  0, -1},

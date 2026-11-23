@@ -2,6 +2,7 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 
 final class StudioRoom implements AutoCloseable {
@@ -22,25 +23,10 @@ final class StudioRoom implements AutoCloseable {
     private final Mesh bulbSupports;
     private final Mesh bulbFilament;
     private final BulbGlow glow;
+    private final EnumMap<ScenePreset, StudioScenery> scenes = new EnumMap<>(ScenePreset.class);
+    private StudioScenery scenery;
 
     StudioRoom() {
-        addBox(0, 3.25f, 0, 16, 9.5f, 16, 0.27f, 0.32f, 0.39f);
-        addBox(0, -1.48f, 0, 15.98f, 0.04f, 15.98f, 0.31f, 0.34f, 0.37f);
-
-        for (int offset = -6; offset <= 6; offset += 2) {
-            addBox(offset, -1.457f, 0, 0.025f, 0.006f, 15.9f, 0.18f, 0.21f, 0.25f);
-            addBox(0, -1.457f, offset, 15.9f, 0.006f, 0.025f, 0.18f, 0.21f, 0.25f);
-        }
-
-        for (int side : new int[] {-1, 1}) {
-            addBox(0, -1.27f, side * 7.94f, 15.88f, 0.36f, 0.12f, 0.17f, 0.21f, 0.27f);
-            addBox(side * 7.94f, -1.27f, 0, 0.12f, 0.36f, 15.88f, 0.17f, 0.21f, 0.27f);
-            for (int panel = -6; panel <= 6; panel += 3) {
-                addBox(panel, 1.3f, side * 7.92f, 2.8f, 4.5f, 0.12f, 0.35f, 0.40f, 0.47f);
-                addBox(side * 7.92f, 1.3f, panel, 0.12f, 4.5f, 2.8f, 0.35f, 0.40f, 0.47f);
-            }
-        }
-
         for (StudioLight light : StudioLight.values()) {
             addHangingBulb(light);
         }
@@ -55,6 +41,10 @@ final class StudioRoom implements AutoCloseable {
             bulbMeshes.forEach(Mesh::close);
             throw failure;
         }
+    }
+
+    void setScene(ScenePreset scene) {
+        scenery = scenes.computeIfAbsent(scene, StudioScenery::new);
     }
 
     private Mesh loadBulbPart(String name) {
@@ -82,11 +72,22 @@ final class StudioRoom implements AutoCloseable {
                 red, green, blue));
     }
 
-    void setLights(StudioLighting lighting) {
-        bulbMeshes.forEach(mesh -> mesh.setLights(lighting));
+    void setLights(StudioLighting lighting, float targetHeight) {
+        bulbMeshes.forEach(mesh -> mesh.setLights(lighting, targetHeight));
+        scenery.setLights(lighting, targetHeight);
+    }
+
+    void setShadows(StudioShadows shadows, float opacity) {
+        bulbMeshes.forEach(mesh -> mesh.setShadows(shadows, opacity));
+        scenery.setShadows(shadows, opacity);
+    }
+
+    void drawSceneryDepth() {
+        scenery.drawDepth();
     }
 
     void drawOpaque(Mesh box, Matrix4f viewProjection, StudioLighting lighting) {
+        scenery.draw(viewProjection);
         for (Part part : parts) {
             box.draw(viewProjection, part.model(), part.red(), part.green(), part.blue());
         }
@@ -130,6 +131,7 @@ final class StudioRoom implements AutoCloseable {
     @Override
     public void close() {
         glow.close();
+        scenes.values().forEach(StudioScenery::close);
         bulbMeshes.forEach(Mesh::close);
     }
 }

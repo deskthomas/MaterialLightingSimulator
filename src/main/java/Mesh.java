@@ -42,15 +42,13 @@ final class Mesh implements AutoCloseable {
         uniform vec3 baseColor;
         uniform bool emissive;
         uniform bool hasVertexNormals;
-        // xyz is the bulb position and w is the intensity (zero when off).
-        uniform vec4 lights[%d];
-        uniform vec3 lightColors[%<d];
         uniform int material;
         uniform float roughness;
         uniform vec3 eye;
         uniform mat4 view;
         uniform samplerCube studioReflection;
         uniform sampler2D opaqueScene;
+        %s
 
         out vec4 fragmentColor;
 
@@ -215,12 +213,15 @@ final class Mesh implements AutoCloseable {
                     continue;
                 }
                 vec3 toLight = lights[i].xyz - worldPosition;
-                float distanceSquared = max(dot(toLight, toLight), 0.01);
-                vec3 lightDirection = toLight * inversesqrt(distanceSquared);
+                float actualDistanceSquared = dot(toLight, toLight);
+                vec3 lightDirection = toLight * inversesqrt(max(actualDistanceSquared, 0.000001));
                 float diffuse = max(dot(normal, lightDirection), 0.0);
-                float irradiance = lights[i].w / distanceSquared;
+                float irradiance = fixtureIrradiance(i, lightDirection, actualDistanceSquared);
                 if (bulbMetal) {
                     irradiance /= 1.0 + irradiance * 0.22;
+                }
+                if (diffuse > 0.0) {
+                    irradiance *= lightVisibility(i, diffuse, worldPosition);
                 }
                 if (diffuseOnly) {
                     if (fixtureHardware) {
@@ -268,7 +269,7 @@ final class Mesh implements AutoCloseable {
             vec3 ambient = albedo * (1.0 - metallic) * 0.07;
             fragmentColor = vec4(encodeColor(ambient + direct + environmentSpecular), 1.0);
         }
-        """.formatted(StudioLight.values().length, FIXTURE_HARDWARE, MaterialLook.BULB_METAL.shaderId,
+        """.formatted(StudioLightShader.SOURCE, FIXTURE_HARDWARE, MaterialLook.BULB_METAL.shaderId,
             MaterialLook.POLISHED_BRASS.shaderId, MaterialLook.POLISHED_STEEL.shaderId,
             MaterialLook.IVORY_WOOD.shaderId);
 
@@ -282,8 +283,7 @@ final class Mesh implements AutoCloseable {
     private final int emissiveLocation;
     private final boolean hasVertexNormals;
     private final int hasVertexNormalsLocation;
-    private final int lightsLocation;
-    private final int lightColorsLocation;
+    private final StudioLightShader fixtureShader;
     private final int materialLocation;
     private final int roughnessLocation;
     private final int eyeLocation;
@@ -297,8 +297,7 @@ final class Mesh implements AutoCloseable {
         baseColorLocation = glGetUniformLocation(program, "baseColor");
         emissiveLocation = glGetUniformLocation(program, "emissive");
         hasVertexNormalsLocation = glGetUniformLocation(program, "hasVertexNormals");
-        lightsLocation = glGetUniformLocation(program, "lights[0]");
-        lightColorsLocation = glGetUniformLocation(program, "lightColors[0]");
+        fixtureShader = new StudioLightShader(program);
         materialLocation = glGetUniformLocation(program, "material");
         roughnessLocation = glGetUniformLocation(program, "roughness");
         eyeLocation = glGetUniformLocation(program, "eye");
@@ -362,23 +361,12 @@ final class Mesh implements AutoCloseable {
         return new Mesh(vertices, false);
     }
 
-    void setLights(StudioLighting lighting) {
-        StudioLight[] lights = StudioLight.values();
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            var buffer = stack.mallocFloat(lights.length * 4);
-            var colors = stack.mallocFloat(lights.length * 3);
-            for (StudioLight light : lights) {
-                StudioLighting.Setting setting = lighting.get(light);
-                buffer.put(light.x).put(light.y).put(light.z).put(setting.power(light));
-                colors.put(setting.red()).put(setting.green()).put(setting.blue());
-            }
-            buffer.flip();
-            colors.flip();
-            glUseProgram(program);
-            glUniform4fv(lightsLocation, buffer);
-            glUniform3fv(lightColorsLocation, colors);
-            glUseProgram(0);
-        }
+    void setLights(StudioLighting lighting, float targetHeight) {
+        fixtureShader.setLights(lighting, targetHeight);
+    }
+
+    void setShadows(StudioShadows shadows, float opacity) {
+        fixtureShader.setShadows(shadows, opacity);
     }
 
     void draw(Matrix4f viewProjection, Matrix4f model, float red, float green, float blue) {
@@ -420,10 +408,14 @@ final class Mesh implements AutoCloseable {
         glUniform3f(baseColorLocation, red, green, blue);
         glUniform1i(emissiveLocation, emissive ? 1 : 0);
         glUniform1i(hasVertexNormalsLocation, hasVertexNormals ? 1 : 0);
+        drawPositions();
+        glUseProgram(0);
+    }
+
+    void drawPositions() {
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLES, 0, vertexCount);
         glBindVertexArray(0);
-        glUseProgram(0);
     }
 
     static int createProgram(String vertexSource, String fragmentSource) {
